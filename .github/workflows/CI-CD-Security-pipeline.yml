@@ -1,0 +1,63 @@
+name: CI-CD-Security-Pipeline
+
+on:
+  push:
+    branches: [main, master]
+  pull_request:
+
+jobs:
+  security:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v3
+
+      - name: Setup Python
+        uses: actions/setup-python@v4
+        with:
+          python-version: '3.x'
+
+      - name: Run CodeQL scan
+        uses: github/codeql-action/init@v3
+        with:
+          languages: python, javascript
+      - uses: github/codeql-action/analyze@v3
+
+      - name: Run Semgrep
+        uses: returntocorp/semgrep-action@v1
+        with:
+          config: auto
+
+      - name: Run Gitleaks for secret scanning
+        uses: zricethezav/gitleaks-action@v1
+        with:
+          args: detect --verbose
+
+      - name: Install Syft SBOM tool
+        run: |
+          curl -sSfL https://raw.githubusercontent.com/anchore/syft/main/install.sh | sh -s -- -b $HOME/.local/bin
+          $HOME/.local/bin/syft dir:. -o spdx-json > sbom.spdx.json
+          # Upload or save SBOM artifact as needed
+
+      - name: Build and Test
+        run: |
+          # Add your build/test commands here
+          python -m unittest discover tests
+
+      - name: Scan Docker image with Trivy
+        if: github.event_name == 'push'
+        run: |
+          docker build -t myapp:latest .
+          trivy image --exit-code 1 myapp:latest
+
+      # Additional deploy steps here
+
+  deploy:
+    needs: security
+    runs-on: ubuntu-latest
+    if: github.ref == 'refs/heads/main' && success()
+    steps:
+      - name: Deploy to production
+        run: |
+          # Your deployment scripts or tools here
